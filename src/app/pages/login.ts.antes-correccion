@@ -1,0 +1,119 @@
+import { Component, inject } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
+import { finalize, timeout } from 'rxjs';
+import { HttpErrorResponse } from '@angular/common/http';
+import { AuthService } from '../core/auth.service';
+
+type Vista = 'login' | 'registro' | 'verificar';
+@Component({
+  selector: 'app-login', standalone: true, imports: [FormsModule],
+  template: `
+    <div class="auth-card">
+      <section class="auth-brand" aria-label="Acerca de MediCore">
+        <div class="hero-mark">✚</div>
+        <span class="eyebrow">CENTRO MÉDICO DIGITAL</span>
+        <h1>Una atención<br /><span>más humana.</span></h1>
+        <p>Organiza citas, pacientes e historiales en un sistema accesible, rápido y seguro.</p>
+        <div class="hero-features"><span>✓ Acceso por roles</span><span>✓ Gestión de citas</span><span>✓ Interfaz accesible</span></div>
+        <div class="brand-decoration" aria-hidden="true">✳</div>
+      </section>
+      <section class="auth-form-side" aria-labelledby="form-titulo">
+        <div class="auth-header">
+          <span class="eyebrow blue">TU ESPACIO SEGURO</span>
+          <h2 id="form-titulo">{{ vista === 'login' ? 'Bienvenido de nuevo' : vista === 'registro' ? 'Crear una cuenta' : 'Verifica tu correo' }}</h2>
+          <p>{{ vista === 'login' ? 'Accede a tu cuenta de MediCore.' : vista === 'registro' ? 'Completa los datos para comenzar.' : 'Introduce el código de seis dígitos enviado a tu correo.' }}</p>
+        </div>
+        @if (vista !== 'verificar') {
+          <div class="auth-tabs" role="group" aria-label="Acceso al sistema">
+            <button type="button" [class.selected]="vista==='login'" [attr.aria-pressed]="vista==='login'" (click)="cambiar('login')">Iniciar sesión</button>
+            <button type="button" [class.selected]="vista==='registro'" [attr.aria-pressed]="vista==='registro'" (click)="cambiar('registro')">Registrarse</button>
+          </div>
+        }
+        @if (error) { <p class="message error" role="alert">⚠ {{ error }}</p> }
+        @if (exito) { <p class="message success" role="status">✓ {{ exito }}</p> }
+        @if (vista === 'login') {
+          <form class="form-stack" #loginForm="ngForm" (ngSubmit)="ingresar()">
+            <div class="field"><label for="loginEmail">Correo electrónico <span aria-hidden="true">*</span></label>
+              <input id="loginEmail" type="email" name="email" [(ngModel)]="email" required email autocomplete="username" placeholder="ejemplo@correo.com" /></div>
+            <div class="field"><label for="loginPass">Contraseña <span aria-hidden="true">*</span></label>
+              <div class="password-control"><input id="loginPass" name="password" [type]="mostrar ? 'text' : 'password'" [(ngModel)]="password" required autocomplete="current-password" placeholder="Tu contraseña" />
+              <button type="button" (click)="mostrar=!mostrar" [attr.aria-label]="mostrar ? 'Ocultar contraseña' : 'Mostrar contraseña'">{{ mostrar ? 'Ocultar' : 'Mostrar' }}</button></div></div>
+            <button class="button button-primary full" type="submit" [disabled]="cargando || loginForm.invalid">{{ cargando ? 'Accediendo...' : 'Iniciar sesión →' }}</button>
+          </form>
+        }
+        @if (vista === 'registro') {
+          <form class="form-stack" #registroForm="ngForm" (ngSubmit)="registrar()">
+            <div class="two-fields">
+              <div class="field"><label for="nombre">Nombre *</label><input id="nombre" name="nombre" [(ngModel)]="nombre" required minlength="2" autocomplete="given-name" /></div>
+              <div class="field"><label for="apellido">Apellido *</label><input id="apellido" name="apellido" [(ngModel)]="apellido" required minlength="2" autocomplete="family-name" /></div>
+            </div>
+            <div class="field"><label for="regEmail">Correo electrónico *</label><input id="regEmail" name="regEmail" type="email" [(ngModel)]="emailRegistro" required email autocomplete="email" /></div>
+            <div class="field"><label for="regPass">Contraseña (mínimo 6 caracteres) *</label><input id="regPass" name="regPass" [type]="mostrar ? 'text' : 'password'" [(ngModel)]="passwordRegistro" required minlength="6" autocomplete="new-password" /></div>
+            <p class="hint">Primero verificas tu correo; después un administrador aprueba tu cuenta.</p>
+            <button class="button button-primary full" type="submit" [disabled]="cargando || registroForm.invalid">{{ cargando ? 'Registrando...' : 'Crear cuenta →' }}</button>
+          </form>
+        }
+        @if (vista === 'verificar') {
+          <form class="form-stack" #verificarForm="ngForm" (ngSubmit)="verificar()">
+            <div class="verify-info">✉️ Código enviado a <strong>{{ emailVerificar }}</strong></div>
+            <div class="field"><label for="codigo">Código de verificación *</label><input id="codigo" type="text" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" name="codigo" [(ngModel)]="codigo" autocomplete="one-time-code" required class="code-input" placeholder="000000" /></div>
+            <button class="button button-primary full" type="submit" [disabled]="cargando || verificarForm.invalid">{{ cargando ? 'Verificando...' : 'Confirmar código' }}</button>
+            <button type="button" class="button button-quiet full" (click)="cambiar('login')">Volver al inicio de sesión</button>
+          </form>
+        }
+        <p class="auth-footer">Protegemos tus datos. Acceso disponible únicamente para cuentas autorizadas.</p>
+      </section>
+    </div>
+  `
+})
+export class LoginComponent {
+  private readonly auth = inject(AuthService);
+  private readonly router = inject(Router);
+  vista: Vista = 'login';
+  email=''; password=''; nombre=''; apellido=''; emailRegistro=''; passwordRegistro='';
+  emailVerificar=''; codigo=''; mostrar=false; cargando=false; error=''; exito='';
+  cambiar(vista: Vista) { if (this.cargando) return; this.vista=vista; this.error=''; this.exito=''; }
+  ingresar() {
+    if (this.cargando) return;
+    this.cargando=true; this.error=''; this.exito='';
+    this.auth.login(this.email, this.password).pipe(timeout(20000),finalize(()=>this.cargando=false)).subscribe({
+      next: sesion => {
+        const destino = this.auth.rutaPorRol(sesion.rol);
+        this.router.navigateByUrl(destino, { replaceUrl: true }).then(ok => {
+          if (!ok) this.error = 'No se pudo abrir el panel. Comprueba los permisos de la cuenta.';
+        }).catch(()=>this.error='No se pudo abrir el panel.');
+      },
+      error: e => this.error = this.mensajeError(e)
+    });
+  }
+  registrar() {
+    if (this.cargando) return;
+    this.cargando=true; this.error=''; this.exito='';
+    this.auth.registrar({nombre:this.nombre.trim(),apellido:this.apellido.trim(),email:this.emailRegistro.trim(),password:this.passwordRegistro})
+      .pipe(timeout(60000), finalize(()=>this.cargando=false)).subscribe({
+        next: res => {this.emailVerificar=res.email || this.emailRegistro; this.passwordRegistro=''; this.vista='verificar'; this.exito='Cuenta creada. Revisa tu correo electrónico.';},
+        error: e => this.error = this.mensajeError(e)
+      });
+  }
+  verificar() {
+    if (this.cargando) return;
+    this.cargando=true; this.error=''; this.exito='';
+    this.auth.verificar(this.emailVerificar,this.codigo.trim()).pipe(timeout(20000),finalize(()=>this.cargando=false)).subscribe({
+      next: ()=> {this.email=this.emailVerificar;this.password='';this.codigo='';this.vista='login';this.exito='Correo verificado. Tu cuenta está pendiente de aprobación.';},
+      error: e => this.error = this.mensajeError(e)
+    });
+  }
+  private mensajeError(e: unknown): string {
+    if (e instanceof HttpErrorResponse) {
+      if (e.status === 0) return 'No se pudo conectar a Spring Boot. Comprueba el puerto 8080.';
+      if (e.status === 401 || e.status === 403) return 'Acceso rechazado: revisa correo, contraseña, verificación y aprobación.';
+      if (e.status === 409) return 'Ese correo ya está registrado.';
+      if (e.status === 400) return (typeof e.error?.message === 'string' ? e.error.message : 'Revisa los campos y el código ingresado.');
+      if (typeof e.error?.message === 'string') return e.error.message;
+      return `No se completó la solicitud (HTTP ${e.status}).`;
+    }
+    if (e instanceof Error && e.name === 'TimeoutError') return 'La solicitud tardó demasiado. Comprueba si la operación se completó antes de repetirla.';
+    return e instanceof Error ? e.message : 'Ocurrió un error inesperado.';
+  }
+}

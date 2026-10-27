@@ -1,0 +1,53 @@
+import { ChangeDetectorRef, Component, DestroyRef, inject, OnInit } from '@angular/core';
+import { RouterLink } from '@angular/router';
+import { ApiService } from '../core/api.service';
+import { AuthService, Rol } from '../core/auth.service';
+import { catchError, of, timeout } from 'rxjs';
+interface Tarjeta { icono:string; titulo:string; valor:number|string; }
+@Component({
+ selector:'app-inicio',standalone:true,imports:[RouterLink],
+ template:`
+ <div class="page-heading"><div><span class="eyebrow blue">PANEL PRINCIPAL</span><h1>Hola, {{auth.nombre || 'bienvenido'}} 👋</h1><p>{{ subtitulo }}</p></div><span class="header-chip">● Sistema en línea</span></div>
+ <section class="welcome-panel"><div><span class="eyebrow">MEDICORE · CENTRO MÉDICO</span><h2>Tu trabajo, más simple.</h2><p>Accede a los módulos de tu rol desde un solo lugar. El menú permanece disponible en todas las páginas.</p><a class="button button-light" [routerLink]="accion.url">{{accion.titulo}} →</a></div><div class="welcome-art" aria-hidden="true">✚</div></section>
+ <section aria-label="Indicadores de la plataforma"><h2 class="section-title">Resumen general</h2><div class="stats-grid">
+ @for(t of tarjetas;track t.titulo){<article class="metric"><span class="metric-icon">{{t.icono}}</span><span>{{t.titulo}}</span><strong>{{t.valor}}</strong></article>}
+ </div></section>
+ <section class="panel"><div class="panel-heading"><div><h2>Accesos rápidos</h2><p class="muted">Funciones disponibles para tu perfil.</p></div></div>
+ <div class="shortcut-grid">@for(x of accesos; track x.url){<a class="shortcut" [routerLink]="x.url"><span class="shortcut-icon">{{x.icono}}</span><span><strong>{{x.titulo}}</strong><small>Ir al módulo →</small></span></a>}</div></section>
+ <section class="tip-panel" aria-label="Consejo de accesibilidad"><span>♿</span><div><strong>Diseñado para todos</strong><p>Usa el botón «Accesibilidad» para ajustar el tamaño del texto, alto contraste, modo oscuro y lectura en voz alta.</p></div></section>
+ `
+})
+export class InicioComponent implements OnInit {
+ readonly auth=inject(AuthService); private readonly api=inject(ApiService);
+ private readonly cdr=inject(ChangeDetectorRef); private readonly destroyRef=inject(DestroyRef);
+ private refrescar(){if(!this.destroyRef.destroyed)this.cdr.detectChanges();}
+ tarjetas: Tarjeta[]=[{icono:'◷',titulo:'Módulos disponibles',valor:0},{icono:'✓',titulo:'Cuenta activa',valor:'Sí'},{icono:'✚',titulo:'Acceso',valor:'Seguro'},{icono:'♿',titulo:'Accesibilidad',valor:'Activa'}];
+ get rol():Rol {return (this.auth.rol || 'ROLE_PACIENTE') as Rol;}
+ get subtitulo(){return ({ROLE_ADMIN:'Supervisa cuentas, permisos y actividad del centro.',ROLE_MEDICO:'Consulta tu agenda y gestiona historiales clínicos.',ROLE_RECEPCION:'Organiza pacientes, médicos y citas de atención.',ROLE_PACIENTE:'Consulta especialidades y solicita atención médica.'} as Record<Rol,string>)[this.rol];}
+ get accesos(){
+   const e=[
+     {titulo:'Usuarios',url:'/admin/usuarios',icono:'👥',roles:['ROLE_ADMIN']},
+     {titulo:'Pacientes',url:'/datos/pacientes',icono:'♧',roles:['ROLE_ADMIN','ROLE_MEDICO','ROLE_RECEPCION']},
+     {titulo:'Médicos',url:'/datos/medicos',icono:'🩺',roles:['ROLE_ADMIN','ROLE_MEDICO','ROLE_RECEPCION','ROLE_PACIENTE']},
+     {titulo:'Citas médicas',url:'/datos/citas',icono:'🗓️',roles:['ROLE_ADMIN','ROLE_MEDICO','ROLE_RECEPCION']},
+     {titulo:'Historiales',url:'/datos/historiales',icono:'📋',roles:['ROLE_ADMIN','ROLE_MEDICO']},
+     {titulo:'Especialidades',url:'/datos/especialidades',icono:'✦',roles:['ROLE_ADMIN','ROLE_RECEPCION','ROLE_MEDICO','ROLE_PACIENTE']},
+     {titulo:'Solicitar cita',url:'/paciente/nueva-cita',icono:'＋',roles:['ROLE_PACIENTE']},
+   ]; return e.filter(i=>i.roles.includes(this.rol));
+ }
+ get accion(){return this.accesos[0] || {titulo:'Ir al menú',url:'/',icono:'✓'};}
+ ngOnInit(){
+  this.tarjetas[0].valor=this.accesos.length;
+  if(this.rol==='ROLE_ADMIN')this.api.usuarios().pipe(timeout({first:25000}),catchError(()=>of([]))).subscribe(x=>{
+    this.tarjetas[1]={icono:'👥',titulo:'Usuarios registrados',valor:x.length};
+    this.tarjetas[2]={icono:'⏳',titulo:'Cuentas pendientes',valor:x.filter(u=>u.estado==='PENDIENTE').length};this.refrescar();
+  });
+  if(this.rol==='ROLE_RECEPCION'||this.rol==='ROLE_MEDICO')this.api.citas().pipe(timeout({first:25000}),catchError(()=>of([]))).subscribe(x=>{
+    this.tarjetas[1]={icono:'🗓️',titulo:'Citas registradas',valor:x.length};
+    this.tarjetas[2]={icono:'✓',titulo:'Atendidas',valor:x.filter(c=>c.estado==='ATENDIDA').length};this.refrescar();
+  });
+  if(this.rol==='ROLE_PACIENTE')this.api.medicos().pipe(timeout({first:25000}),catchError(()=>of([]))).subscribe(x=>{
+    this.tarjetas[1]={icono:'🩺',titulo:'Médicos disponibles',valor:x.length};this.refrescar();
+  });
+ }
+}

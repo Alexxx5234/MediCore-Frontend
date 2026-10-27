@@ -1,0 +1,53 @@
+import { Component, inject, OnInit } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { ApiService } from '../core/api.service';
+import { Medico } from '../core/models';
+@Component({
+  selector: 'app-cita-paciente', standalone: true, imports: [FormsModule],
+  template: `
+  <div class="page-heading"><div><span class="eyebrow blue">ATENCIÓN MÉDICA</span><h1>Solicitar cita</h1><p>Completa tus datos y selecciona un horario disponible.</p></div></div>
+  <div class="columns-two">
+    <section class="panel"><h2>1. Datos del paciente</h2><p class="muted">Si aún no tienes un ID de paciente, regístrate aquí.</p>
+      <form #pacForm="ngForm" (ngSubmit)="registrarPaciente()" class="form-stack">
+      <div class="two-fields"><div class="field"><label for="pNombre">Nombre</label><input id="pNombre" name="pNombre" [(ngModel)]="paciente.nombre" required minlength="2"></div>
+      <div class="field"><label for="pApellido">Apellido</label><input id="pApellido" name="pApellido" [(ngModel)]="paciente.apellido" required minlength="2"></div></div>
+      <div class="field"><label for="pCedula">Cédula (10 dígitos)</label><input id="pCedula" inputmode="numeric" name="pCedula" [(ngModel)]="paciente.cedula" pattern="[0-9]{10}" maxlength="10" required></div>
+      <div class="field"><label for="pTelefono">Teléfono (opcional)</label><input id="pTelefono" name="pTelefono" [(ngModel)]="paciente.telefono" pattern="[0-9]{7,10}" inputmode="tel"></div>
+      <button class="button button-outline full" [disabled]="cargando || pacForm.invalid">{{ cargando ? 'Registrando...' : 'Registrar paciente' }}</button></form>
+      @if(pacienteCreado){<p class="message success" role="status">Paciente registrado. ID asignado: <strong>{{pacienteCreado}}</strong>.</p>}
+    </section>
+    <section class="panel"><h2>2. Datos de la cita</h2><p class="muted">Puedes usar el ID del paso 1 o uno que ya tengas registrado.</p>
+      <form #citaForm="ngForm" (ngSubmit)="reservar()" class="form-stack">
+        <div class="field"><label for="pacienteId">ID del paciente</label><input id="pacienteId" name="pacienteId" type="number" min="1" [(ngModel)]="cita.pacienteId" required /></div>
+        <div class="field"><label for="medicoId">Médico</label><select id="medicoId" name="medicoId" [(ngModel)]="cita.medicoId" required><option value="">Selecciona un médico</option>@for(m of medicos;track m.id){<option [value]="m.id">{{m.nombre}} {{m.apellido}} · {{m.especialidad?.nombre || 'Medicina'}}</option>}</select></div>
+        <div class="field"><label for="fechaHora">Fecha y hora</label><input id="fechaHora" name="fechaHora" type="datetime-local" [min]="minFecha" [(ngModel)]="cita.fechaHora" required /></div>
+        <button class="button button-primary full" [disabled]="cargando || citaForm.invalid">{{cargando?'Guardando...':'Solicitar cita →'}}</button>
+      </form>
+      @if(mensaje){<p class="message success" role="status">{{mensaje}}</p>}
+      @if(error){<p class="message error" role="alert">{{error}}</p>}
+    </section>
+  </div>
+  <div class="tip-panel"><span>ℹ</span><div><strong>Importante</strong><p>Tu API actual no vincula automáticamente las cuentas de usuario con los registros de pacientes. El ID de paciente debe corresponder a la persona que solicita la cita. Antes de publicar el sistema, esa relación debe validarse desde Spring Boot.</p></div></div>
+  `
+})
+export class CitaPacienteComponent implements OnInit {
+ private readonly api=inject(ApiService);
+ medicos:Medico[]=[];paciente={nombre:'',apellido:'',cedula:'',telefono:''};
+ pacienteCreado:number|null=null;
+ cita={pacienteId:null as number|null,medicoId:'' as string,fechaHora:''};
+ cargando=false;error='';mensaje='';
+ get minFecha(){const d=new Date(Date.now()+60000);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16);}
+ ngOnInit(){this.api.medicos().subscribe({next:d=>this.medicos=d,error:()=>this.error='No se pudo consultar la lista de médicos.'});}
+ registrarPaciente(){this.cargando=true;this.error='';this.api.crear<{id:number}>('pacientes',this.paciente).subscribe({
+  next:d=>{this.pacienteCreado=d.id;this.cita.pacienteId=d.id;this.cargando=false;},error:e=>{this.cargando=false;this.error=`No se pudo registrar al paciente (HTTP ${e.status}).`;}
+ });}
+ reservar(){
+  if(!this.cita.pacienteId||!this.cita.medicoId||!this.cita.fechaHora)return;
+  if(new Date(this.cita.fechaHora).getTime()<=Date.now()){this.error='Selecciona una fecha futura.';return;}
+  this.cargando=true;this.error='';this.mensaje='';
+  this.api.crear<{id:number}>('citas',{
+   pacienteId:Number(this.cita.pacienteId), medicoId:Number(this.cita.medicoId),
+   fechaHora:this.cita.fechaHora+':00', estado:'PROGRAMADA'
+  }).subscribe({next:d=>{this.cargando=false;this.mensaje='Cita creada correctamente, número #'+d.id+'.';this.cita.fechaHora='';},error:e=>{this.cargando=false;this.error=`No se pudo registrar la cita (HTTP ${e.status}).`;}});
+ }
+}
